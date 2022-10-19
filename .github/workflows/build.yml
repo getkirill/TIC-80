@@ -615,7 +615,7 @@ jobs:
 
   # === Export ===
   export:
-    needs: [winxp, windows, linux, rpi, macos, html]
+    needs: [winxp, windows, linux, rpi, macos, html, winxp-pro, windows-pro, linux-pro, rpi-pro, macos-pro]
     runs-on: ubuntu-latest
 
     steps:
