@@ -653,6 +653,32 @@ jobs:
         uses: actions/download-artifact@v2
         with:
           name: tic80-html
+      # Pro: windows, xp, linux, rpi, mac
+      - name: Download Windows Pro artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: tic80-windows-pro
+          path: winprodir
+      - name: Download Windows XP Pro artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: tic80-winxp-pro
+          path: winxpprodir
+      - name: Download Linux Pro artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: tic80-linux-pro
+          path: linuxprodir
+      - name: Download RPi Pro artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: tic80-rpi-pro
+          path: rpiprodir
+      - name: Download macOS Pro artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: tic80-macos-pro
+          path: macosprodir
 
       - name: Rename
         run: |
@@ -663,6 +689,12 @@ jobs:
           cp rpidir/* rpi
           zip html.zip index.html tic80.js tic80.wasm
           mv -f html.zip html
+        # Pro: windows, xp, linux, rpi, mac
+          cp winprodir/* win-pro
+          cp winxpprodir/* winxp-pro
+          cp linuxprodir/* linux-pro
+          cp rpiprodir/* rpi-pro
+          cp macosprodir/* macos-pro
 
       - name: Deploy
         uses: actions/upload-artifact@v2
@@ -674,6 +706,11 @@ jobs:
             linux
             mac
             rpi
+            winxp-pro
+            win-pro
+            linux-pro
+            mac-pro
+            rpi-pro
             html
 
   # === Export stub ===
