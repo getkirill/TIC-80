@@ -653,7 +653,6 @@ jobs:
         uses: actions/download-artifact@v2
         with:
           name: tic80-html
-      # Pro: windows, xp, linux, rpi, mac
       - name: Download Windows Pro artifact
         uses: actions/download-artifact@v2
         with:
@@ -689,7 +688,6 @@ jobs:
           cp rpidir/* rpi
           zip html.zip index.html tic80.js tic80.wasm
           mv -f html.zip html
-        # Pro: windows, xp, linux, rpi, mac
           cp winprodir/* win-pro
           cp winxpprodir/* winxp-pro
           cp linuxprodir/* linux-pro
