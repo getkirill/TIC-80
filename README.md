@@ -1,4 +1,10 @@
-[![Build Status](https://github.com/nesbox/TIC-80/workflows/Build/badge.svg)](https://github.com/nesbox/TIC-80/actions?query=workflow%3ABuild)
+If you are here to get Pro version for free or TIC-80 compiled from main branch, do the following:
+1. Spread the word or support in any other way [the original](https://github.com/nesbox/TIC-80).
+2. Go to [Actions](https://github.com/getkirill/TIC-80/actions/), then go to the latest successful run.
+3. Scroll to the rock bottom, and pick your TIC-80 build.
+4. Have fun.
+
+--------
 
 ![TIC-80](https://tic80.com/img/logo64.png)
 **TIC-80 TINY COMPUTER** - [https://tic80.com](https://tic80.com)
