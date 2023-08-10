@@ -37,6 +37,8 @@ typedef void(*RemapFunc)(void*, s32 x, s32 y, RemapResult* result);
 typedef void(*TraceOutput)(void*, const char*, u8 color);
 typedef void(*ErrorOutput)(void*, const char*);
 typedef void(*ExitCallback)(void*);
+typedef u64(*CounterCallback)(void*);
+typedef u64(*FreqCallback)(void*);
 
 typedef struct
 {
@@ -44,8 +46,8 @@ typedef struct
     ErrorOutput error;
     ExitCallback exit;
     
-    u64 (*counter)(void*);
-    u64 (*freq)(void*);
+    CounterCallback counter;
+    FreqCallback freq;
     u64 start;
 
     void* data;
@@ -57,6 +59,7 @@ typedef void(*tic_boot)(tic_mem* memory);
 typedef void(*tic_scanline)(tic_mem* memory, s32 row, void* data);
 typedef void(*tic_border)(tic_mem* memory, s32 row, void* data);
 typedef void(*tic_gamemenu)(tic_mem* memory, s32 index, void* data);
+typedef bool(*tic_lang_isalnum)(char c);
 
 typedef struct
 {
@@ -97,11 +100,19 @@ typedef struct
     const char* blockCommentEnd2;
     const char* blockStringStart;
     const char* blockStringEnd;
+    const char* stdStringStartEnd;
     const char* singleComment;
     const char* blockEnd;
 
     const char* const * keywords;
     s32 keywordsCount;
+
+    tic_lang_isalnum lang_isalnum;
+    bool useStructuredEdition;
+
+    s32 api_keywordsCount;
+    const char** api_keywords;
+    
 } tic_script_config;
 
 extern tic_script_config* Languages[];
@@ -352,7 +363,7 @@ enum
         "The map can be up to 240 cells wide by 136 deep.\n"                                                            \
         "This function will draw the desired area of the map to a specified screen position.\n"                         \
         "For example, map(5,5,12,10,0,0) will draw a 12x10 section of the map, "                                        \
-        "starting from map co-ordinates (5,5) to screen position (0,0).\n"                                              \
+        "starting from map coordinates (5,5) to screen position (0,0).\n"                                              \
         "The map function's last parameter is a powerful callback function "                                            \
         "for changing how map cells (sprites) are drawn when map is called.\n"                                          \
         "It can be used to rotate, flip and replace sprites while the game is running.\n"                               \

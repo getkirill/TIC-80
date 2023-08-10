@@ -77,7 +77,9 @@ static inline void setPixelFast(tic_core* core, s32 x, s32 y, u8 color)
 
 static u8 getPixel(tic_core* core, s32 x, s32 y)
 {
-    return tic_api_peek4((tic_mem*)core, y * TIC80_WIDTH + x);
+    return x < 0 || y < 0 || x >= TIC80_WIDTH || y >= TIC80_HEIGHT
+        ? 0
+        : tic_api_peek4((tic_mem*)core, y * TIC80_WIDTH + x);
 }
 
 #define EARLY_CLIP(x, y, width, height) \
@@ -155,7 +157,7 @@ static void drawTile(tic_core* core, tic_tileptr* tile, s32 x, s32 y, u8* colors
     if (rotate == tic_90_rotate) orientation ^= 1;
     else if (rotate == tic_180_rotate) orientation ^= 3;
     else if (rotate == tic_270_rotate) orientation ^= 2;
-    if (rotate == tic_90_rotate || rotate == tic_270_rotate) orientation |= 2;
+    if (rotate == tic_90_rotate || rotate == tic_270_rotate) orientation |= 4;
 
     if (scale == 1) {
         // the most common path
@@ -496,6 +498,9 @@ static void setSidePixel(s32 x, s32 y)
 
 static void drawEllipse(tic_mem* memory, s32 x0, s32 y0, s32 x1, s32 y1, u8 color, PixelFunc pix)
 {
+    if(x0 > x1 || y0 > y1)
+        return;
+
     s64 a = abs(x1 - x0), b = abs(y1 - y0), b1 = b & 1; /* values of diameter */
     s64 dx = 4 * (1 - a) * b * b, dy = 4 * (b1 + 1) * a * a; /* error increment */
     s64 err = dx + dy + b1 * a * a, e2; /* error of 1.step */
