@@ -124,6 +124,7 @@ struct Studio
 
 #if defined(BUILD_EDITORS)
     EditorMode menuMode;
+    ViMode viMode;
 
     struct
     {
@@ -321,7 +322,7 @@ const char* studioExportSfx(Studio* studio, s32 index, const char* filename)
     return NULL;
 }
 
-const char* studioExportMusic(Studio* studio, s32 track, const char* filename)
+const char* studioExportMusic(Studio* studio, s32 track, s32 bank, const char* filename)
 {
     tic_mem* tic = studio->tic;
 
@@ -332,7 +333,16 @@ const char* studioExportMusic(Studio* studio, s32 track, const char* filename)
 #if TIC80_SAMPLE_CHANNELS == 2
         wave_enable_stereo();
 #endif
-
+#if defined(TIC80_PRO)
+        // chained = true in CLI. Set to false if want to use unchained
+        bool chained = studio->bank.chained;
+        if(chained)
+            memset(studio->bank.indexes, bank, sizeof studio->bank.indexes);
+        else
+            for(s32 i = 0; i < COUNT_OF(BankModes); i++)
+                if(BankModes[i] == TIC_MUSIC_MODE)
+                    studio->bank.indexes[i] = bank;
+#endif
         const tic_sfx* sfx = getSfxSrc(studio);
         const tic_music* music = getMusicSrc(studio);
 
@@ -340,7 +350,7 @@ const char* studioExportMusic(Studio* studio, s32 track, const char* filename)
         music2ram(tic->ram, music);
 
         const tic_music_state* state = &tic->ram->music_state;
-        const Music* editor = studio->banks.music[studio->bank.index.music];
+        const Music* editor = studio->banks.music[bank];
 
         tic_api_music(tic, track, -1, -1, false, editor->sustain, -1, -1);
 
@@ -914,7 +924,10 @@ static inline float animEffect(AnimEffect effect, float x)
 static void animTick(Movie* movie)
 {
     for(Anim* it = movie->items, *end = it + movie->count; it != end; ++it)
-        *it->value = lerp(it->start, it->end, animEffect(it->effect, (float)movie->tick / it->time));
+    {
+	float tick = (float)(movie->tick < it->time ? movie->tick : it->time);
+        *it->value = lerp(it->start, it->end, animEffect(it->effect, tick / it->time));
+    }
 }
 
 void processAnim(Movie* movie, void* data)
@@ -1244,6 +1257,10 @@ void setStudioMode(Studio* studio, EditorMode mode)
         music->tab = (music->tab + 1) % MUSIC_TAB_COUNT;
     }
 #endif
+
+#if defined(BUILD_EDITORS)
+    studio->viMode = 0;
+#endif
 }
 
 EditorMode getStudioMode(Studio* studio)
@@ -1270,6 +1287,23 @@ void resumeGame(Studio* studio)
     tic_core_resume(studio->tic);
     studio->mode = TIC_RUN_MODE;
 }
+
+#if defined(BUILD_EDITORS)
+void setStudioViMode(Studio* studio, ViMode mode) {
+    studio->viMode = mode;
+}
+
+ViMode getStudioViMode(Studio* studio) {
+    return studio->viMode;
+}
+
+bool checkStudioViMode(Studio* studio, ViMode mode) {
+    return (
+        getConfig(studio)->options.keybindMode == KEYBIND_VI
+        && getStudioViMode(studio) == mode
+    );
+}
+#endif
 
 static inline bool pointInRect(const tic_point* pt, const tic_rect* rect)
 {
@@ -1346,8 +1380,7 @@ static void confirmHandler(bool yes, void* data)
 
         if(studio->menuMode == TIC_RUN_MODE)
         {
-            tic_core_resume(studio->tic);
-            studio->mode = TIC_RUN_MODE;
+            resumeGame(studio);
         }
         else setStudioMode(studio, studio->menuMode);
 
@@ -1370,29 +1403,33 @@ void confirmDialog(Studio* studio, const char** text, s32 rows, ConfirmCallback 
     if(studio->mode != TIC_MENU_MODE)
     {
         studio->menuMode = studio->mode;
-        studio->mode = TIC_MENU_MODE;
+    }
+        
+    setStudioMode(studio, TIC_MENU_MODE);
 
-        static const MenuItem Answers[] = 
-        {
-            {"",    NULL},
-            {"NO",  confirmNo},
-            {"YES", confirmYes},
-        };
+    static MenuItem Answers[] = 
+    {
+        {"",    NULL},
+        {"(N)O",  confirmNo},
+        {"(Y)ES", confirmYes},
+    };
 
-        s32 count = rows + COUNT_OF(Answers);
-        MenuItem* items = malloc(sizeof items[0] * count);
-        SCOPE(free(items))
-        {
-            for(s32 i = 0; i != rows; ++i)
-                items[i] = (MenuItem){text[i], NULL};
+    Answers[1].hotkey = tic_key_n;
+    Answers[2].hotkey = tic_key_y;
 
-            memcpy(items + rows, Answers, sizeof Answers);
+    s32 count = rows + COUNT_OF(Answers);
+    MenuItem* items = malloc(sizeof items[0] * count);
+    SCOPE(free(items))
+    {
+        for(s32 i = 0; i != rows; ++i)
+            items[i] = (MenuItem){text[i], NULL};
 
-            studio_menu_init(studio->menu, items, count, count - 2, 0,
-                NULL, MOVE((ConfirmData){studio, callback, data}));
+        memcpy(items + rows, Answers, sizeof Answers);
 
-            playSystemSfx(studio, 0);
-        }
+        studio_menu_init(studio->menu, items, count, count - 2, 0,
+            NULL, MOVE((ConfirmData){studio, callback, data}));
+
+        playSystemSfx(studio, 0);
     }
 }
 
@@ -1524,7 +1561,7 @@ void runGame(Studio* studio)
 }
 
 #if defined(BUILD_EDITORS)
-static void saveProject(Studio* studio)
+void saveProject(Studio* studio)
 {
     CartSaveResult rom = studio->console->save(studio->console);
 
@@ -1682,13 +1719,7 @@ static void switchBank(Studio* studio, s32 bank)
 
 void gotoMenu(Studio* studio) 
 {
-    if(studio->mode != TIC_MENU_MODE)
-    {
-        tic_core_pause(studio->tic);
-        tic_api_reset(studio->tic);
-        studio->mode = TIC_MENU_MODE;
-    }
-
+    setStudioMode(studio, TIC_MENU_MODE);
     studio->mainmenu = studio_mainmenu_init(studio->menu, studio->config);
 }
 
@@ -1753,6 +1784,12 @@ static void processShortcuts(Studio* studio)
 #if defined(BUILD_EDITORS)
         else if(keyWasPressedOnce(studio, tic_key_escape))
         {
+            if(
+                getConfig(studio)->options.keybindMode == KEYBIND_VI
+                && getStudioViMode(studio) != VI_NORMAL
+            ) 
+                return;
+
             switch(studio->mode)
             {
             case TIC_MENU_MODE:     
@@ -2413,7 +2450,7 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
         },
 
         .samplerate = samplerate,
-        .net = tic_net_create("http://"TIC_HOST),
+        .net = tic_net_create(TIC_WEBSITE),
 #endif
         .tic = tic_core_create(samplerate, format),
     };

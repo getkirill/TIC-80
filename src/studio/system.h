@@ -73,6 +73,18 @@ void    tic_sys_default_mapping(tic_mapping* mapping);
     macro(COMMENT)  \
     macro(SIGN)
 
+enum KeybindMode {
+    KEYBIND_STANDARD,
+    KEYBIND_EMACS,
+    KEYBIND_VI
+};
+
+enum TabMode {
+    TAB_AUTO,
+    TAB_TAB,
+    TAB_SPACE
+};
+
 typedef struct
 {
     struct
@@ -126,11 +138,14 @@ typedef struct
         
         bool fullscreen;
         bool vsync;
+        bool integerScale;
         s32 volume;
         tic_mapping mapping;
-
 #if defined(BUILD_EDITORS)
+        enum KeybindMode keybindMode;
+        enum TabMode tabMode;
         bool devmode;
+        s32 tabSize;
 #endif
     } options;
 
