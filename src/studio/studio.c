@@ -36,6 +36,8 @@
 #include "net.h"
 #include "wave_writer.h"
 #include "ext/gif.h"
+#define MSF_GIF_IMPL
+#include "msf_gif.h"
 
 #endif
 
@@ -179,10 +181,12 @@ struct Studio
     struct
     {
         bool record;
+        bool screenshot;
 
         u32* buffer;
-        s32 frames;
         s32 frame;
+
+        MsfGifState gif;
 
     } video;
 
@@ -216,8 +220,6 @@ struct Studio
 };
 
 #if defined(BUILD_EDITORS)
-
-#define FRAME_SIZE (TIC80_FULLWIDTH * TIC80_FULLHEIGHT * sizeof(u32))
 
 static const char VideoGif[] = "video%i.gif";
 static const char ScreenGif[] = "screen%i.gif";
@@ -433,6 +435,19 @@ bool keyWasPressed(Studio* studio, tic_key key)
     tic_mem* tic = studio->tic;
     return tic_api_keyp(tic, key, KEYBOARD_HOLD, KEYBOARD_PERIOD);
 }
+
+bool enterWasPressed(Studio* studio)
+{
+    tic_mem* tic = studio->tic;
+    return ticEnterWasPressed(tic, KEYBOARD_HOLD, KEYBOARD_PERIOD);
+}
+
+bool ticEnterWasPressed(tic_mem* tic, s32 hold, s32 period)
+{
+    return tic_api_keyp(tic, tic_key_return, hold, period) ||
+           tic_api_keyp(tic, tic_key_numpadenter, hold, period);
+}
+
 
 bool anyKeyWasPressed(Studio* studio)
 {
@@ -1589,18 +1604,6 @@ void saveProject(Studio* studio)
     else showPopupMessage(studio, "error: file not saved :(");
 }
 
-static void screen2buffer(u32* buffer, const u32* pixels, const tic_rect* rect)
-{
-    pixels += rect->y * TIC80_FULLWIDTH;
-
-    for(s32 i = 0; i < rect->h; i++)
-    {
-        memcpy(buffer, pixels + rect->x, rect->w * sizeof(pixels[0]));
-        pixels += TIC80_FULLWIDTH;
-        buffer += rect->w;
-    }
-}
-
 static void setCoverImage(Studio* studio)
 {
     tic_mem* tic = studio->tic;
@@ -1614,38 +1617,29 @@ static void setCoverImage(Studio* studio)
 
 static void stopVideoRecord(Studio* studio, const char* name)
 {
-    if(studio->video.buffer)
+    MsfGifResult result = msf_gif_end(&studio->video.gif);
+
+    // Find an available filename to save.
+    s32 i = 0;
+    char filename[TICNAME_MAX];
+    do
     {
-        {
-            s32 size = 0;
-            u8* data = malloc(FRAME_SIZE * studio->video.frame);
-            s32 i = 0;
-            char filename[TICNAME_MAX];
-
-            gif_write_animation(data, &size, TIC80_FULLWIDTH, TIC80_FULLHEIGHT, (const u8*)studio->video.buffer, studio->video.frame, TIC80_FRAMERATE, getConfig(studio)->gifScale);
-
-            // Find an available filename to save.
-            do
-            {
-                snprintf(filename, sizeof filename, name, ++i);
-            }
-            while(tic_fs_exists(studio->fs, filename));
-
-            // Now that it has found an available filename, save it.
-            if(tic_fs_save(studio->fs, filename, data, size, true))
-            {
-                char msg[TICNAME_MAX];
-                sprintf(msg, "%s saved :)", filename);
-                showPopupMessage(studio, msg);
-
-                tic_sys_open_path(tic_fs_path(studio->fs, filename));
-            }
-            else showPopupMessage(studio, "error: file not saved :(");
-        }
-
-        free(studio->video.buffer);
-        studio->video.buffer = NULL;
+        snprintf(filename, sizeof filename, name, ++i);
     }
+    while(tic_fs_exists(studio->fs, filename));
+
+    // Now that it has found an available filename, save it.
+    if(tic_fs_save(studio->fs, filename, result.data, result.dataSize, true))
+    {
+        char msg[TICNAME_MAX];
+        sprintf(msg, "%s saved :)", filename);
+        showPopupMessage(studio, msg);
+
+        tic_sys_open_path(tic_fs_path(studio->fs, filename));
+    }
+    else showPopupMessage(studio, "error: file not saved :(");
+
+    msf_gif_free(result);
 
     studio->video.record = false;
 }
@@ -1658,27 +1652,18 @@ static void startVideoRecord(Studio* studio)
     }
     else
     {
-        studio->video.frames = getConfig(studio)->gifLength * TIC80_FRAMERATE;
-        studio->video.buffer = malloc(FRAME_SIZE * studio->video.frames);
+        studio->video.record = true;
+        studio->video.frame = 0;
 
-        if(studio->video.buffer)
-        {
-            studio->video.record = true;
-            studio->video.frame = 0;
-        }
+        s32 scale = studio->config->data.uiScale;
+        msf_gif_begin(&studio->video.gif, TIC80_FULLWIDTH * scale, TIC80_FULLHEIGHT * scale);
     }
 }
 
 static void takeScreenshot(Studio* studio)
 {
-    studio->video.frames = 1;
-    studio->video.buffer = malloc(FRAME_SIZE);
-
-    if(studio->video.buffer)
-    {
-        studio->video.record = true;
-        studio->video.frame = 0;
-    }
+    startVideoRecord(studio);
+    studio->video.screenshot = true;
 }
 #endif
 
@@ -1723,6 +1708,12 @@ void gotoMenu(Studio* studio)
     studio->mainmenu = studio_mainmenu_init(studio->menu, studio->config);
 }
 
+static bool enterWasPressedOnce(Studio* studio)
+{
+    return keyWasPressedOnce(studio, tic_key_return) ||
+           keyWasPressedOnce(studio, tic_key_numpadenter);
+}
+
 static void processShortcuts(Studio* studio)
 {
     tic_mem* tic = studio->tic;
@@ -1744,7 +1735,7 @@ static void processShortcuts(Studio* studio)
 
     if(alt)
     {
-        if (keyWasPressedOnce(studio, tic_key_return)) gotoFullscreen(studio);
+        if (enterWasPressedOnce(studio)) gotoFullscreen(studio);
 #if defined(BUILD_EDITORS)
         else if(studio->mode != TIC_RUN_MODE)
         {
@@ -1763,7 +1754,7 @@ static void processShortcuts(Studio* studio)
 #if defined(BUILD_EDITORS)
         else if(keyWasPressedOnce(studio, tic_key_pageup)) changeStudioMode(studio, -1);
         else if(keyWasPressedOnce(studio, tic_key_pagedown)) changeStudioMode(studio, +1);
-        else if(keyWasPressedOnce(studio, tic_key_return)) runGame(studio);
+        else if(enterWasPressedOnce(studio)) runGame(studio);
         else if(keyWasPressedOnce(studio, tic_key_r)) runGame(studio);
         else if(keyWasPressedOnce(studio, tic_key_s)) saveProject(studio);
 #endif
@@ -1794,12 +1785,16 @@ static void processShortcuts(Studio* studio)
             {
             case TIC_MENU_MODE:     
                 getConfig(studio)->options.devmode 
-                    ? setStudioMode(studio, studio->prevMode) 
+                    ? setStudioMode(studio, studio->prevMode == TIC_RUN_MODE 
+                        ? TIC_CONSOLE_MODE 
+                        : studio->prevMode) 
                     : studio_menu_back(studio->menu);
                 break;
             case TIC_RUN_MODE:      
                 getConfig(studio)->options.devmode 
-                    ? setStudioMode(studio, studio->prevMode) 
+                    ? setStudioMode(studio, studio->prevMode == TIC_RUN_MODE 
+                        ? TIC_CONSOLE_MODE 
+                        : studio->prevMode) 
                     : gotoMenu(studio);
                 break;
             case TIC_CONSOLE_MODE: 
@@ -1864,7 +1859,7 @@ static void checkChanges(Studio* studio)
 
             if(studio->cart.mdate && date > studio->cart.mdate)
             {
-                if(studioCartChanged(studio))
+                if(studioCartChanged(studio) && studio->mode != TIC_MENU_MODE)
                 {
                     static const char* Rows[] =
                     {
@@ -1873,7 +1868,7 @@ static void checkChanges(Studio* studio)
                         "Do you want to reload it?"
                     };
 
-                    confirmDialog(studio, Rows, COUNT_OF(Rows), reloadConfirm, NULL);
+                    confirmDialog(studio, Rows, COUNT_OF(Rows), reloadConfirm, NULL);                        
                 }
                 else console->updateProject(console);
             }
@@ -1907,23 +1902,35 @@ static void recordFrame(Studio* studio, u32* pixels)
 {
     if(studio->video.record)
     {
-        if(studio->video.frame < studio->video.frames)
+        if(studio->video.frame % 2 == 0)
         {
-            tic_rect rect = {0, 0, TIC80_FULLWIDTH, TIC80_FULLHEIGHT};
-            screen2buffer(studio->video.buffer + (TIC80_FULLWIDTH*TIC80_FULLHEIGHT) * studio->video.frame, pixels, &rect);
+            s32 scale = studio->config->data.uiScale;
+            s32 w = TIC80_FULLWIDTH * scale;
+            s32 h = TIC80_FULLHEIGHT * scale;
 
-            if(studio->video.frame % TIC80_FRAMERATE < TIC80_FRAMERATE / 2)
-            {
-                drawRecordLabel(studio, pixels, TIC80_WIDTH-24, 8);
-            }
+            u32 *ptr = studio->video.buffer;
+            const u32 *src = pixels;
+            for(s32 y = 0; y < h; y++, src = pixels + (y / scale) * TIC80_FULLWIDTH)
+                for(s32 x = 0; x < w; x++)
+                    *ptr++ = src[x / scale];
 
-            studio->video.frame++;
-
+            // with centiSecondsPerFame == 3 we have 1000/(3*10)=~33.3fps, so we have to save every second frame
+            msf_gif_frame(&studio->video.gif, (u8*)studio->video.buffer, 3, 16, w * sizeof(u32));
         }
-        else
+
+        if(studio->video.screenshot)
         {
-            stopVideoRecord(studio, studio->video.frame == 1 ? ScreenGif : VideoGif);
+            studio->video.screenshot = false;
+            stopVideoRecord(studio, VideoGif);
+            return;
         }
+
+        if(studio->video.frame % TIC80_FRAMERATE < TIC80_FRAMERATE / 2)
+        {
+            drawRecordLabel(studio, pixels, TIC80_WIDTH - 24, 8);
+        }
+
+        studio->video.frame++;
     }
 }
 
@@ -2089,6 +2096,9 @@ void studioConfigChanged(Studio* studio)
     Code* code = studio->code;
     if(code->update)
         code->update(code);
+
+    s32 scale = studio->config->data.uiScale;
+    studio->video.buffer = realloc(studio->video.buffer, TIC80_FULLWIDTH * scale * TIC80_FULLHEIGHT * scale * sizeof(u32));
 #endif
 
     updateSystemFont(studio);
@@ -2138,7 +2148,7 @@ static void blitCursor(Studio* studio)
 
     if(tic->input.mouse && !m->relative && m->x < TIC80_FULLWIDTH && m->y < TIC80_FULLHEIGHT)
     {
-        s32 sprite = tic->ram->vram.vars.cursor.sprite;
+        s32 sprite = CLAMP(tic->ram->vram.vars.cursor.sprite, 0, TIC_BANK_SPRITES - 1);
         const tic_bank* bank = &tic->cart.bank0;
 
         tic_point hot = {0};
@@ -2151,7 +2161,7 @@ static void blitCursor(Studio* studio)
                 {0, 0},
                 {3, 0},
                 {2, 3},
-            }[sprite];
+            }[CLAMP(sprite, 0, 2)];
         }
         else if(sprite == 0) return;
 
@@ -2341,6 +2351,7 @@ void studio_delete(Studio* studio)
 
 #if defined(BUILD_EDITORS)
     tic_net_close(studio->net);
+    free(studio->video.buffer);
 #endif
 
     free(studio->fs);

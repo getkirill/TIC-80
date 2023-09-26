@@ -1095,10 +1095,22 @@ static bool replaceSelection(Code* code)
     return false;
 }
 
+static inline enum KeybindMode getKeybindMode(Code* code)
+{
+    return getConfig(code->studio)->options.keybindMode;
+}
+
+
+static inline bool shouldUseStructuredEdit(Code* code)
+{
+    const bool emacsMode = getKeybindMode(code) == KEYBIND_EMACS;
+    return tic_core_script_config(code->tic)->useStructuredEdition && emacsMode;
+}
+
+
 static bool structuredDeleteOverride(Code* code, char* pos)
 {
-    const bool useStructuredEdit = tic_core_script_config(code->tic)->useStructuredEdition;
-    if (!useStructuredEdit)
+    if (!shouldUseStructuredEdit(code))
         return false;
 
     const char* end = code->src + strlen(code->src);
@@ -1207,15 +1219,13 @@ static void backspaceWord(Code* code)
 
 char* findLineEnd(Code* code, char* pos)
 {
-    const bool useStructuredEdit = tic_core_script_config(code->tic)->useStructuredEdition;
-    
     char* lineend = pos+1;
     const char* end = code->src + strlen(code->src);
     
     while (lineend < end)
     {
         if (islineend(*lineend)) break;
-        if (useStructuredEdit && iscloseparen_(code, *lineend)) break;
+        if (shouldUseStructuredEdit(code) && iscloseparen_(code, *lineend)) break;
         ++lineend;
     }
     return lineend;
@@ -1227,8 +1237,7 @@ static void deleteLine(Code* code)
     char* lineend = linestart+1;
     const char* end = code->src + strlen(code->src);
     
-    const bool useStructuredEdit = tic_core_script_config(code->tic)->useStructuredEdition;
-    if (useStructuredEdit)
+    if (shouldUseStructuredEdit(code))
     {
         if (islineend(*linestart) || islineend(*lineend))
             noop;
@@ -1287,8 +1296,10 @@ static void inputSymbolBase(Code* code, char sym)
     if (strlen(code->src) >= MAX_CODE)
         return;
 
-    const bool useStructuredEdit = tic_core_script_config(code->tic)->useStructuredEdition;
-    if((useStructuredEdit || getConfig(code->studio)->theme.code.autoDelimiters) && (sym == '(' || sym == '[' || sym == '{'))
+    const bool useStructuredEdit = shouldUseStructuredEdit(code);
+    const bool isOpeningDelimiter = sym == '(' || sym == '[' || sym == '{';
+
+    if((useStructuredEdit || getConfig(code->studio)->theme.code.autoDelimiters) && isOpeningDelimiter)
     {
         insertCode(code, code->cursor.position++, (const char[]){sym, matchingDelim(sym), '\0'});
     } else if (useStructuredEdit && isdoublequote(sym)) {
@@ -1411,6 +1422,9 @@ static void copyFromClipboard(Code* code, bool killSelection)
                 // cut clipboard code if overall code > max code size
                 {
                     size_t codeSize = strlen(code->src);
+
+                    if(codeSize >= MAX_CODE)
+                        return;
 
                     if (codeSize + size > MAX_CODE)
                     {
@@ -1901,8 +1915,7 @@ static void addCommentToLine(Code* code, char* line, size_t size, const char* co
 
 static void sexpify(Code* code)
 {
-    const bool useStructuredEdit = tic_core_script_config(code->tic)->useStructuredEdition;
-    if (!useStructuredEdit)
+    if (!shouldUseStructuredEdit(code))
         return;
 
     char* pos = code->cursor.position;
@@ -1939,8 +1952,7 @@ static void sexpify(Code* code)
 
 static void extirpSExp(Code* code)
 {
-    const bool useStructuredEdit = tic_core_script_config(code->tic)->useStructuredEdition;
-    if (!useStructuredEdit)
+    if (!shouldUseStructuredEdit(code))
         return;
     
     const char* start = code->src;
@@ -2502,7 +2514,7 @@ static void processViKeyboard(Code* code)
         else if (keyWasPressed(code->studio, tic_key_tab)) 
             doTab(code, shift, ctrl);
 
-        else if (keyWasPressed(code->studio, tic_key_return))
+        else if (enterWasPressed(code->studio))
             newLine(code);
 
         else if (clear || shift)
@@ -2835,7 +2847,7 @@ static void processKeyboard(Code* code)
 
     if(tic->ram->input.keyboard.data == 0) return;
 
-    enum KeybindMode keymode = getConfig(code->studio)->options.keybindMode;
+    enum KeybindMode keymode = getKeybindMode(code);
 
     if (keymode == KEYBIND_VI) 
     {
@@ -2983,14 +2995,14 @@ static void processKeyboard(Code* code)
         else if(keyWasPressed(code->studio, tic_key_pagedown))  pageDown(code);
         else if(keyWasPressed(code->studio, tic_key_delete))    deleteChar(code);
         else if(keyWasPressed(code->studio, tic_key_backspace)) backspaceChar(code);
-        else if(keyWasPressed(code->studio, tic_key_return))    newLine(code);
+        else if(enterWasPressed(code->studio))                          newLine(code);
         else if(keyWasPressed(code->studio, tic_key_tab))       doTab(code, shift, ctrl);
         else usedKeybinding = false;
     }
 
     if(!usedKeybinding)
     {
-        if(shift && keyWasPressed(code->studio, tic_key_return))
+        if(shift && enterWasPressed(code->studio))
         {
             newLineAutoClose(code);
             usedKeybinding = true;
@@ -3169,7 +3181,7 @@ static void textFindTick(Code* code)
 {
 
 
-    if(keyWasPressed(code->studio, tic_key_return)) setCodeMode(code, TEXT_EDIT_MODE);
+    if(enterWasPressed(code->studio)) setCodeMode(code, TEXT_EDIT_MODE);
     else if(keyWasPressed(code->studio, tic_key_up)
         || keyWasPressed(code->studio, tic_key_down)
         || keyWasPressed(code->studio, tic_key_left)
@@ -3214,7 +3226,7 @@ static void textFindTick(Code* code)
 static void textReplaceTick(Code* code)
 {
 
-    if(keyWasPressed(code->studio, tic_key_return)) {
+    if (enterWasPressed(code->studio)) {
         if (*code->popup.text && code->popup.offset == NULL) //still in "find" mode
         {
             code->popup.offset = code->popup.text + strlen(code->popup.text);
@@ -3305,7 +3317,7 @@ static void textGoToTick(Code* code)
 {
     tic_mem* tic = code->tic;
 
-    if(keyWasPressed(code->studio, tic_key_return))
+    if(enterWasPressed(code->studio))
     {
         if(*code->popup.text)
             updateGotoCode(code);
@@ -3450,7 +3462,7 @@ static void processSidebar(Code* code)
     else if(keyWasPressed(code->studio, tic_key_end))
         updateSidebarIndex(code, code->sidebar.size - 1);
 
-    else if(keyWasPressed(code->studio, tic_key_return))
+    else if(enterWasPressed(code->studio))
     {
         updateSidebarCode(code);        
         setCodeMode(code, TEXT_EDIT_MODE);

@@ -31,9 +31,9 @@
 #endif
 
 #if defined(__TIC_ANDROID__)            
-#define INTEGER_SCALE_DEFAULT true
-#else
 #define INTEGER_SCALE_DEFAULT false
+#else
+#define INTEGER_SCALE_DEFAULT true
 #endif
 
 #if defined (TIC_BUILD_WITH_LUA)
@@ -87,56 +87,6 @@ static void readGlobalBool(lua_State* lua, const char* name, bool* val)
 
     lua_pop(lua, 1);
 }
-
-#if defined(CRT_SHADER_SUPPORT)
-
-static void readString(lua_State* lua, const char* name, const char** val)
-{
-    lua_getfield(lua, -1, name);
-
-    if (lua_isstring(lua, -1))
-        *val = strdup(lua_tostring(lua, -1));
-
-    lua_pop(lua, 1);
-}
-
-static void readConfigCrtShader(Config* config, lua_State* lua)
-{
-    lua_getglobal(lua, "CRT_SHADER");
-
-    if(lua_type(lua, -1) == LUA_TTABLE)
-    {
-        readString(lua, "VERTEX", &config->data.shader.vertex);
-        readString(lua, "PIXEL", &config->data.shader.pixel);
-    }
-
-#if defined (EMSCRIPTEN)
-    // WebGL supports only version 100 shaders.
-    // Luckily, the format is nearly identical.
-    // This code detects the incompatible line(s) at
-    // the beginning of each shader and patches them
-    // in-place in memory.
-    char *s = (char *)config->data.shader.vertex;
-    if (strncmp("\t\t#version 110", s, 14) == 0) {
-        // replace the two tabs, with a "//" comment, disabling the #version tag.
-        s[0] = '/';
-        s[1] = '/';
-    }
-    s = (char *)config->data.shader.pixel;
-    if (strncmp("\t\t#version 110\n\t\t//precision highp float;", s, 41) == 0) {
-        // replace the two tabs, with a "//" comment, disabling the #version tag.
-        s[0] = '/';
-        s[1] = '/';
-        // replace the "//" comment with spaces, enabling the precision statement.
-        s[17] = ' ';
-        s[18] = ' ';
-    }
-#endif
-
-    lua_pop(lua, 1);        
-}
-
-#endif
 
 static void readCodeTheme(Config* config, lua_State* lua)
 {
@@ -201,15 +151,13 @@ static void readConfig(Config* config)
     {
         if(luaL_loadstring(lua, config->cart->code.data) == LUA_OK && lua_pcall(lua, 0, LUA_MULTRET, 0) == LUA_OK)
         {
-            readGlobalInteger(lua,  "GIF_LENGTH",           &config->data.gifLength);
-            readGlobalInteger(lua,  "GIF_SCALE",            &config->data.gifScale);
             readGlobalBool(lua,     "CHECK_NEW_VERSION",    &config->data.checkNewVersion);
             readGlobalInteger(lua,  "UI_SCALE",             &config->data.uiScale);
             readGlobalBool(lua,     "SOFTWARE_RENDERING",   &config->data.soft);
 
-#if defined(CRT_SHADER_SUPPORT)
-            readConfigCrtShader(config, lua);
-#endif
+            if(config->data.uiScale <= 0)
+                config->data.uiScale = 1;
+
             readTheme(config, lua);
         }
 
@@ -342,6 +290,11 @@ void initConfig(Config* config, Studio* studio, tic_fs* fs)
 
     loadConfigData(fs, OptionsDatPath, &config->data.options, sizeof config->data.options);
 
+#if defined(__TIC_LINUX__)
+    // do not load fullscreen option on Linux
+    config->data.options.fullscreen = false;
+#endif
+
     tic_api_reset(config->tic);
 }
 
@@ -350,12 +303,5 @@ void freeConfig(Config* config)
     tic_fs_saveroot(config->fs, OptionsDatPath, &config->data.options, sizeof config->data.options, true);
 
     free(config->cart);
-
-#if defined(CRT_SHADER_SUPPORT)
-
-    free((void*)config->data.shader.vertex);
-    free((void*)config->data.shader.pixel);
-#endif
-
     free(config);
 }

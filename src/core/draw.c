@@ -389,6 +389,8 @@ void tic_api_cls(tic_mem* tic, u8 color)
 
     static const struct ClipRect EmptyClip = { 0, 0, TIC80_WIDTH, TIC80_HEIGHT };
 
+    color = mapColor(tic, color);
+
     if (MEMCMP(core->state.clip, EmptyClip))
     {
         memset(&vram->screen, (color & 0xf) | (color << TIC_PALETTE_BPP), sizeof(tic_screen));
@@ -846,6 +848,10 @@ void tic_api_ttri(tic_mem* tic,
     tic_texture_src texsrc, u8* colors, s32 count, 
     float z1, float z2, float z3, bool depth)
 {
+    // do not use depth if user passed z=0.0
+    if(z1 < FLT_EPSILON || z2 < FLT_EPSILON || z3 < FLT_EPSILON)
+        depth = false;
+
     TexData texData = 
     {
         .sheet = getTileSheetFromSegment(tic, tic->ram->vram.blit.segment),
